@@ -1,0 +1,215 @@
+{
+  "name": "Infrastructure AI Self-Healing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zabbix-incident",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "<id-here>",
+      "name": "Zabbix Webhook Alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1344,
+        -352
+      ],
+      "webhookId": "<webhookId-here>"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a strict infrastructure parser. Read the Zabbix alert and output the correct Proxmox command based on the resource type by dynamically extracting the exact ID found in the text.\n\nRules:\n- If the alert is an LXC container (lxc/<ID>), format as 'pct start <ID>'.\n- If the alert is a Virtual Machine (qm/<ID>), format as 'qm start <ID>'.\n- If the alert is a general host alert (like CPU load, disk, or memory without a specific lxc/qm ID), set \"actionCommand\" to \"none\".\n\nExample 1:\nAlert: Proxmox VE: LXC [node/test (lxc/109)]: Not running\nOutput: {\"actionCommand\": \"pct start 109\"}\n\nExample 2:\nAlert: Proxmox VE: VM [node/prod (qm/205)]: Not running\nOutput: {\"actionCommand\": \"qm start 205\"}\n\nCurrent Zabbix Event Name: \n{{ $json.body.event_name }}\n\nCurrent Zabbix Message:\n{{ $json.body.message }}\n\nOutput ONLY a raw JSON object with no markdown ticks or extra text, following this exact structure (replace <ID> with the actual ID extracted from the current alert):\n{\n  \"actionCommand\": \"pct start <ID>\"\n}",
+        "options": {
+          "systemMessage": "You are an SRE AI Assistant. You analyze homelab issues and prepare remediation plans. Aftert preparing resolve the issues presented"
+        }
+      },
+      "id": "<id-here>",
+      "name": "AI Incident Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -864,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:3b",
+        "options": {
+          "numBatch": 1024,
+          "numThread": 2
+        }
+      },
+      "id": "<id-here>",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        -864,
+        -176
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "<id-here>",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "<email-here>",
+        "toEmail": "<email-here>",
+        "subject": "={{ \"[Zabbix Auto-Remediation] Executed: \" + JSON.parse($('AI Incident Analyzer').first().json.output).actionCommand }}",
+        "emailFormat": "html",
+        "html": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 6px; padding: 20px; background-color: #f9f9f9;\">\n  <h2 style=\"color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px; margin-top: 0;\">\n    [Automated Homelab Self-Healing]\n  </h2>\n  \n  <p style=\"color: #555; font-size: 14px;\">\n    An incident was automatically detected by Zabbix, evaluated by Local AI, and processed via remote pipeline.\n  </p>\n\n  <table style=\"width: 100%; border-collapse: collapse; margin-top: 15px; background: #fff; border-radius: 4px; overflow: hidden; border: 1px solid #ddd;\">\n    <tr style=\"background-color: #f2f2f2;\">\n      <th style=\"padding: 10px; text-align: left; font-size: 13px; color: #333; border-bottom: 1px solid #ddd;\" colspan=\"2\">Event Details</th>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; font-size: 13px; color: #444; border-bottom: 1px solid #eee;\"><strong>Event:</strong></td>\n      <td style=\"padding: 10px; font-size: 13px; color: #444; border-bottom: 1px solid #eee;\">{{ $('Zabbix Webhook Alert').first().json.body.event_name }}</td>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; font-size: 13px; color: #444; border-bottom: 1px solid #eee;\" valign=\"top\"><strong>Message:</strong></td>\n      <td style=\"padding: 10px; font-size: 13px; color: #444; border-bottom: 1px solid #eee; font-family: monospace; background: #fafafa;\">{{ $('Zabbix Webhook Alert').first().json.body.message }}</td>\n    </tr>\n    <tr style=\"background-color: #f2f2f2;\">\n      <th style=\"padding: 10px; text-align: left; font-size: 13px; color: #333; border-bottom: 1px solid #ddd;\" colspan=\"2\">Remediation Status</th>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; font-size: 13px; color: #444;\"><strong>Action Executed:</strong></td>\n      <td style=\"padding: 10px; font-size: 13px; color: #27ae60; font-family: monospace; font-weight: bold;\">\n        <code>{{ JSON.parse($('AI Incident Analyzer').first().json.output).actionCommand }}</code>\n      </td>\n    </tr>\n  </table>\n\n  <p style=\"color: #888; font-size: 12px; margin-top: 20px; text-align: center; border-top: 1px solid #eee; padding-top: 10px;\">\n    <em>This fix was executed automatically by your n8n homelab pipeline.</em>\n  </p>\n</div>",
+        "options": {}
+      },
+      "id": "<id-here>",
+      "name": "Send Approval Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        -368
+      ],
+      "webhookId": "<webhookId-here>",
+      "credentials": {
+        "smtp": {
+          "id": "<id-here>",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "={{ JSON.parse($json.output).actionCommand }}"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        -368
+      ],
+      "id": "<id-here>",
+      "name": "Execute a command",
+      "credentials": {
+        "sshPassword": {
+          "id": "<id-here>",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "<typeValidation-here>",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "<id-here>",
+              "leftValue": "={{ $json.body.message }}",
+              "rightValue": "Problem started",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1120,
+        -352
+      ],
+      "id": "<id-here>",
+      "name": "Filter Active Problems"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Zabbix Webhook Alert": {
+      "main": [
+        [
+          {
+            "node": "Filter Active Problems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Incident Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Execute a command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Incident Analyzer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Email": {
+      "main": [
+        []
+      ]
+    },
+    "Execute a command": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Active Problems": {
+      "main": [
+        [
+          {
+            "node": "AI Incident Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "<versionId-here>",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "<instanceId-here>"
+  },
+  "id": "<id-here>",
+  "tags": []
+}
