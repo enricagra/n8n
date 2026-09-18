@@ -1,73 +1,130 @@
-Narito ang isang pormang-GitHub na `README.md` na hango sa mga clean at professional homelab repository layout (tulad ng mga estruktura ng mga n8n/automation repos), na naka-angkop nang eksakto sa ating Part 2 case study:
+# Infrastructure AI Self-Healing
 
-```markdown
-# 🤖 Mini Self-Healing Infrastructure & Dynamic AIOps Remediation (Part 2)
+A local, n8n-based self-healing workflow for responding to Zabbix alerts and performing limited Proxmox remediation with a local Ollama model.
 
-> Part of the **Pinoy Tech Share** technical case study series on building local, privacy-first, self-healing enterprise automation.
+> **Status:** Experimental. Review and test this workflow carefully before enabling it in a production environment.
 
-[![n8n](https://img.shields.io/badge/n8n-Orchestration-orange?style=flat-square&logo=n8n)](https://n8n.io)
-[![Zabbix](https://img.shields.io/badge/Zabbix-Monitoring-red?style=flat-square&logo=zabbix)](https://www.zabbix.com)
-[![Ollama](https://img.shields.io/badge/Ollama-Local%20AI-blue?style=flat-square)](https://ollama.com)
-[![Proxmox](https://img.shields.io/badge/Proxmox-LXC-orange?style=flat-square&logo=proxmox)](https://www.proxmox.com)
+## Overview
 
----
+The workflow receives an alert from Zabbix, filters for active problems, asks a local AI model to identify a remediation command, executes that command over SSH, and sends an email report.
 
-## 📌 Overview
+The intended use case is simple recovery actions for homelab workloads, such as starting or stopping an affected Proxmox LXC container or virtual machine.
 
-This repository and documentation cover **Part 2** of our local AIOps automation pipeline. Moving beyond passive logging and security digests (Part 1), this implementation bridges the gap between monitoring telemetry and active, closed-loop system recovery using local artificial intelligence and n8n orchestration.
+## Architecture
 
----
-
-## 🏗️ Architecture Flow
-
-
+```text
+Zabbix alert
+    │
+    ▼
+HTTP webhook in n8n
+    │
+    ▼
+Filter active problems
+    │
+    ▼
+Local Ollama model
+    │
+    ▼
+AI-generated remediation command
+    │
+    ▼
+SSH command execution
+    │
+    ▼
+Email notification
 ```
 
-[ Zabbix (Telemetry) ]
-│ (HTTP Webhook POST)
-▼
-[ n8n on Proxmox LXC ] ──> [ Ollama (Local LLM) ] ──> [ Safe Execution Layer (pct start/stop) ]
+## Workflow
 
-```
+1. **Receive the alert** – Zabbix sends a `POST` request to the n8n webhook at `zabbix-incident`.
+2. **Filter the event** – The workflow continues when the alert message contains `Problem started`.
+3. **Analyze the incident** – The alert is sent to the `AI Incident Analyzer` using the local `qwen2.5:3b` Ollama model.
+4. **Execute remediation** – The command returned by the model is passed to the SSH node.
+5. **Send a report** – n8n sends an email containing the executed command and incident details.
 
----
+## Components
 
-## ⚙️ Component Stack
+- **Zabbix** – Monitoring and alert source.
+- **n8n** – Workflow orchestration.
+- **Ollama** – Local AI inference.
+- **Proxmox** – Target virtualization platform.
+- **SSH** – Remote command execution.
+- **SMTP** – Email notification.
 
-*   **Telemetry & Event Source (Zabbix):** Monitors resource health, container states, and performance thresholds, dispatching rich JSON payloads via webhooks upon anomaly detection.
-*   **Orchestration Engine (n8n on Proxmox LXC):** Hosted locally inside a dedicated Linux Container with explicit `systemd` network bindings (`0.0.0.0`) and static local routing (`[Local IP of n8n]:5678`) for seamless internal communication.
-*   **Cognitive Processing (Local LLM via Ollama):** Evaluates unstructured alert messages locally, translating raw error context into clean, structured execution parameters without recurring cloud API costs.
-*   **Execution Layer:** Interfaces directly with host environments or container APIs to execute corrective routines.
+## Requirements
 
----
+- A working n8n instance.
+- Zabbix configured to send webhook alerts.
+- An Ollama instance reachable by n8n.
+- The `qwen2.5:3b` model, or another compatible chat model.
+- SSH access from n8n to the Proxmox host.
+- An SMTP account for notifications.
+- A Proxmox user with only the permissions required for the approved remediation commands.
 
-## 🛡️ Safety & Governance: The "Start/Stop" Rule
+## Import and configure
 
-To mitigate the inherent risks of small-parameter model hallucinations and unintended system mutations, this setup strictly enforces:
+1. Import [`Infrastructure AI Self-Healing.json`](./Infrastructure%20AI%20Self-Healing.json) into n8n.
+2. Configure the following credentials:
+   - Ollama
+   - SSH
+   - SMTP
+3. Update the webhook configuration and copy the generated webhook URL into Zabbix.
+4. Review the prompt in **AI Incident Analyzer**.
+5. Update the sender and recipient addresses in **Send Approval Email**.
+6. Test the workflow with a non-critical container or a simulated Zabbix alert.
+7. Enable the workflow only after reviewing successful test executions.
 
-*   **Non-Destructive Operations Only:** The AI's operational scope is locked exclusively to basic `start` or `stop` lifecycle routines for non-critical LXC containers or VMs (e.g., executing `pct start 108`).
-*   **Zero Configuration Mutation:** Commands that modify system configurations, storage pools, or network bridges are blocked entirely during initial test phases.
+## Security and safety
 
----
+This workflow executes a command generated by an AI model. Treat that capability as dangerous and apply additional controls before using it outside a disposable lab.
 
-## 🚀 Implementation Workflow
+- Keep the workflow disabled while configuring and testing it.
+- Use a dedicated SSH account with least-privilege permissions.
+- Restrict the account to an allowlist of non-destructive commands such as approved `pct start` and `pct stop` operations.
+- Do not grant unrestricted root SSH access to n8n.
+- Do not allow commands that modify storage, networking, firewall rules, users, credentials, or host configuration.
+- Validate the target VM/LXC ID and command on a separate validation step before SSH execution.
+- Consider requiring human approval **before** execution. In the current workflow, the email is sent after the SSH command runs; it is a notification, not a blocking approval gate.
+- Keep Zabbix, n8n, Ollama, Proxmox, and SMTP credentials in their respective credential stores. Never commit secrets to this repository.
+- Avoid sending sensitive infrastructure data to external AI providers; this workflow is designed to use local Ollama inference.
 
-1.  **Webhook Ingestion:** When a service crashes or a container stops unexpectedly, Zabbix fires a structured POST request containing event metadata and error logs to the n8n webhook endpoint.
-2.  **Cognitive Root-Cause Parsing:** The payload is passed to the local LLM node. The model analyzes the error signature and outputs a deterministic JSON object containing the exact remediation command required (e.g., `{"actionCommand": "pct start 108"}`).
-3.  **Command Validation & Execution:** The orchestration workflow extracts the payload dynamically and passes it to the command execution module, closing the incident recovery cycle.
+## Important limitation
 
----
+The current workflow passes the parsed `actionCommand` directly from the AI node to the SSH node. The README and AI prompt should not be treated as a security boundary. For safer operation, add deterministic command validation and an approval gate before the `Execute a command` node.
 
-## 📖 Series Navigation
+## Troubleshooting
 
-*   **Part 1:** Zero-Cloud AIOps & Security Digest Engine *(Passive telemetry & local analysis)*
-*   **Part 2:** [Mini Self-Healing Infrastructure & Dynamic AIOps Remediation](https://pinoytechshare.blogspot.com/2026/09/part-2-mini-self-healing-infrastructure.html) *(Active closed-loop execution)*
-*   **Part 3:** Human-in-the-Loop (HITL) Governance Gates *(Upcoming)*
+### The webhook does not receive alerts
 
----
+- Confirm that the workflow is active.
+- Verify the webhook URL configured in Zabbix.
+- Check that the request uses `POST` and contains the expected `message` field.
+- Review the n8n execution history for incoming payloads.
 
-## 📄 License
+### The AI node fails
 
-Shared under the [MIT License](LICENSE) for educational and homelab engineering reference.
+- Confirm that Ollama is reachable from the n8n host.
+- Verify that the configured model is installed.
+- Check the Ollama credential and model name.
 
-```
+### SSH execution fails
+
+- Test SSH connectivity from the n8n host.
+- Check the SSH credential and remote user permissions.
+- Confirm that the target command is valid on the Proxmox host.
+- Review the command returned by the AI before enabling automatic execution.
+
+### Email delivery fails
+
+- Verify the SMTP credential and server settings.
+- Confirm the sender and recipient addresses.
+- Check whether the SMTP server requires TLS, an app password, or additional authentication.
+
+## Files
+
+- [`Infrastructure AI Self-Healing.json`](./Infrastructure%20AI%20Self-Healing.json) – n8n workflow export.
+- `README.md` – Documentation and safety notes.
+
+## License
+
+This project is provided as-is for educational and homelab use. Add a `LICENSE` file if you intend to publish it under a specific open-source license.
